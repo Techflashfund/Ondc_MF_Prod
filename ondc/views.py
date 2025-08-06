@@ -122,7 +122,7 @@ class ONDCSearchView(APIView):
             "X-Gateway-Subscriber-Id": os.getenv("SUBSCRIBER_ID")
         }
 
-        response = requests.post("https://prod.registry.ondc.org/search/", data=request_body_str, headers=headers)
+        response = requests.post("https://prod.registry.ondc.org/search", data=request_body_str, headers=headers)
 
         try:
             send_to_analytics(schema_type='search',req_body=payload)
