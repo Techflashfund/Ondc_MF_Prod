@@ -8,122 +8,277 @@ class Migration(migrations.Migration):
 
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Transaction',
+            name="Transaction",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('transaction_id', models.CharField(max_length=100, unique=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('status', models.CharField(blank=True, max_length=50, null=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("transaction_id", models.CharField(max_length=100, unique=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("status", models.CharField(blank=True, max_length=50, null=True)),
             ],
         ),
         migrations.CreateModel(
-            name='SubmissionID',
+            name="SubmissionID",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('submission_id', models.CharField(max_length=100)),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("submission_id", models.CharField(max_length=100)),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='SelectSIP',
+            name="SelectSIP",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_selects', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_selects",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='PaymentSubmisssion',
+            name="PaymentSubmisssion",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payment_id', models.CharField(max_length=100)),
-                ('status_pay', models.CharField(max_length=100)),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payment_id", models.CharField(max_length=100)),
+                ("status_pay", models.CharField(max_length=100)),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='OnUpdate',
+            name="OnUpdate",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_update', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_update",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='OnStatus',
+            name="OnStatus",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('pan', models.CharField(blank=True, max_length=20, null=True)),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_status', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("pan", models.CharField(blank=True, max_length=20, null=True)),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_status",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='OnInitSIP',
+            name="OnInitSIP",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_init', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_init",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='OnConfirm',
+            name="OnConfirm",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_confirm', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_confirm",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='OnCancel',
+            name="OnCancel",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_cancel', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_cancel",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='Message',
+            name="Message",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100, unique=True)),
-                ('action', models.CharField(max_length=50)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='messages', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100, unique=True)),
+                ("action", models.CharField(max_length=50)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="messages",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='FullOnSearch',
+            name="FullOnSearch",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('message_id', models.CharField(max_length=100)),
-                ('payload', models.JSONField()),
-                ('timestamp', models.DateTimeField()),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('isin', models.CharField(blank=True, max_length=50, null=True)),
-                ('transaction', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='full_on_searchs', to='ondc.transaction')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("message_id", models.CharField(max_length=100)),
+                ("payload", models.JSONField()),
+                ("timestamp", models.DateTimeField()),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("isin", models.CharField(blank=True, max_length=50, null=True)),
+                (
+                    "transaction",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="full_on_searchs",
+                        to="ondc.transaction",
+                    ),
+                ),
             ],
         ),
     ]
