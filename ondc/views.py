@@ -120,7 +120,7 @@ class ONDCSearchView(APIView):
         }
 
         response = requests.post(
-            "https://prod.registry.ondc.org/search",
+            "https://prod.gateway.ondc.org/search",
             data=request_body_str,
             headers=headers,
         )
