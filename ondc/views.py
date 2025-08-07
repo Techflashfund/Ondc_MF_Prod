@@ -2645,7 +2645,7 @@ class Lumpsum(APIView):
         pan = request.data.get("pan", "ABCDE1234F")
         message_id = request.data.get("message_id")
 
-        if not all([transaction_id, bpp_id, bpp_uri]):
+        if not all([ bpp_id, bpp_uri]):
             return Response(
                 {"error": "Required all Fields"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -2656,6 +2656,9 @@ class Lumpsum(APIView):
             payload__context__bpp_uri=bpp_uri,
             transaction__transaction_id=transaction_id,
         )
+        if not transaction_id:
+            transaction_id=str(uuid.uuid4())
+            
         if not message_id:
             message_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat(sep="T", timespec="milliseconds") + "Z"
