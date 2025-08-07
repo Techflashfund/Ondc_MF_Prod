@@ -92,7 +92,6 @@ def create_authorisation_header(request_body=None, created=None, expires=None):
         )
 
     signing_key = create_signing_string(hash_message(request_body), created, expires)
-    print("Signing Key:", signing_key)  # For debugging
     signature = sign_response(signing_key, private_key=os.getenv("Signing_private_key"))
 
     subscriber_id = os.getenv("SUBSCRIBER_ID", "buyer-app.ondc.org")
