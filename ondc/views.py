@@ -2640,6 +2640,7 @@ class Lumpsum(APIView):
         transaction_id = request.data.get("transaction_id")
         bpp_id = request.data.get("bpp_id")
         bpp_uri = request.data.get("bpp_uri")
+        isin=request.data.get("isin")
         preferred_type = "LUMPSUM"
         amount = request.data.get("amount", "3000")
         pan = request.data.get("pan", "ABCDE1234F")
@@ -2654,6 +2655,7 @@ class Lumpsum(APIView):
             FullOnSearch,
             payload__context__bpp_id=bpp_id,
             payload__context__bpp_uri=bpp_uri,
+            isin=isin
             # transaction__transaction_id=transaction_id,
         )
         if not transaction_id:
