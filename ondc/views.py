@@ -91,7 +91,6 @@ class ONDCSearchView(APIView):
                 }
             },
         }
-        print(payload)
         # Store transaction and message
         transaction, _ = Transaction.objects.get_or_create(
             transaction_id=transaction_id
