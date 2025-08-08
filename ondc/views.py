@@ -12,16 +12,18 @@ from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .cryptic_utils import create_authorisation_header
-from .models import (FullOnSearch, Message, OnCancel, OnConfirm, OnInitSIP,
+from .models import (FullOnSearch,Scheme, Message, OnCancel, OnConfirm, OnInitSIP,
                      OnStatus, OnUpdate, PaymentSubmisssion, SelectSIP,
                      SubmissionID, Transaction)
 from .utils import (build_frequency, get_client_ip, push_observability_logs,
                     send_to_analytics)
+from .serializer import SchemeSerializer
 
 BAP_ID = "investment.flashfund.in"
 BAP_URI = "https://investment.flashfund.in/ondc"
@@ -185,21 +187,45 @@ class OnSearchView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            try:
-                isin = data["message"]["catalog"]["providers"][0]["items"][1]["tags"][
-                    1
-                ]["list"][0]["value"]
-            except (KeyError, IndexError, TypeError):
-                isin = None
+            # try:
+            #     isin = data["message"]["catalog"]["providers"][0]["items"][1]["tags"][
+            #         1
+            #     ]["list"][0]["value"]
+            # except (KeyError, IndexError, TypeError):
+            #     isin = None
 
             # Save to database
-            FullOnSearch.objects.create(
-                transaction=transaction,
-                message_id=message_id,
-                payload=data,
-                timestamp=timestamp,
-                isin=isin,
-            )
+            with transaction.atomic():
+                fos=FullOnSearch.objects.create(
+                    transaction=transaction,
+                    message_id=message_id,
+                    payload=data,
+                    timestamp=timestamp,
+                    
+                )
+
+                providers = data.get("message", {}).get("catalog", {}).get("providers", [])
+                scheme_objects = []
+
+                for provider in providers:
+                    for item in provider.get("items", []):
+                        scheme_objects.append(
+                            Scheme(
+                                full_on_search=fos,
+                                scheme_id=item.get("id"),
+                                name=item.get("descriptor", {}).get("name"),
+                                category_ids=item.get("category_ids", []),
+                                parent_item_id=item.get("parent_item_id"),
+                                fulfillment_ids=item.get("fulfillment_ids", []),
+                                tags=item.get("tags", []),
+                                isin=self.extract_isin_from_tags(item.get("tags", [])),
+                                payload=item 
+                            )
+                        )
+
+                if scheme_objects:
+                    Scheme.objects.bulk_create(scheme_objects, ignore_conflicts=True)
+
             try:
                 send_to_analytics(schema_type="on_search", req_body=data)
             except Exception as e:
@@ -220,6 +246,31 @@ class OnSearchView(APIView):
         return Response(
             {"message": {"ack": {"status": "ACK"}}}, status=status.HTTP_200_OK
         )
+    
+    @staticmethod
+    def extract_isin_from_tags(tags):
+        if not tags:
+            return None
+        for tag in tags:
+            if tag.get("descriptor", {}).get("code") == "PLAN_IDENTIFIERS":
+                for item in tag.get("list", []):
+                    if item.get("descriptor", {}).get("code") == "ISIN":
+                        return item.get("value")
+        return None
+
+class SchemeByISINView(APIView):
+    def get(self, request, *args, **kwargs):
+        isin = request.query_params.get("isin")
+        if not isin:
+            return Response(
+                {"error": "Missing required query parameter: isin"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        scheme = get_object_or_404(Scheme, isin=isin)
+        serializer = SchemeSerializer(scheme)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class OnSearchDataView(APIView):

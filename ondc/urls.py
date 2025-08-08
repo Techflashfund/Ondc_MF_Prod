@@ -8,6 +8,7 @@ urlpatterns = [
     path("search/", ONDCSearchView.as_view()),
     path("on_search", OnSearchView.as_view(), name="on_search"),
     # SIP Creation
+    path("scheme", SchemeByISINView.as_view(), name="scheme-by-isin"),
     path("on_searchdata", OnSearchDataView.as_view(), name="on_search_data"),
     path("select/", SIPCreationView.as_view(), name="select"),
     path("on_select", OnSelectSIPView.as_view(), name="on_select"),

@@ -37,6 +37,25 @@ class FullOnSearch(models.Model):
         return f"{self.transaction.transaction_id} - {self.message_id}"
 
 
+class Scheme(models.Model):
+    full_on_search = models.ForeignKey(
+        FullOnSearch, 
+        on_delete=models.CASCADE, 
+        related_name="schemes"
+    )
+    scheme_id = models.CharField(max_length=100, db_index=True)
+    name = models.CharField(max_length=255)
+    category_ids = models.JSONField()
+    parent_item_id = models.CharField(max_length=100, null=True, blank=True)
+    fulfillment_ids = models.JSONField(null=True, blank=True)
+    tags = models.JSONField(null=True, blank=True)
+    isin = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    payload = models.JSONField(null=True, blank=True)  # <-- full raw scheme data
+
+    def __str__(self):
+        return f"{self.name} ({self.isin})"
+
+
 class SelectSIP(models.Model):
     transaction = models.ForeignKey(
         Transaction, on_delete=models.CASCADE, related_name="full_on_selects"
