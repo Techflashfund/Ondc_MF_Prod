@@ -153,8 +153,6 @@ class OnSearchView(APIView):
     def post(self, request, *args, **kwargs):
         try:
             data = request.data
-            logger.info("Received on_search callback:\n%s", json.dumps(data, indent=2))
-            print("Received on_search callback:\n", json.dumps(data, indent=2))
 
             context = data.get("context", {})
             message_id = context.get("message_id")
