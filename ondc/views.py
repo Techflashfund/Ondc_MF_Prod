@@ -317,7 +317,11 @@ class OnSearchView(APIView):
                                         # add other fields if needed
                                     )
                                 )
-                    FulfillmentOption.objects.bulk_create(fulfillment_objs)
+                    try:
+                        FulfillmentOption.objects.bulk_create(fulfillment_objs)
+                    except Exception as e:
+                        logger.error(f"bulk_create error: {e}, data: {fulfillment_objs}")
+                        raise
 
             # Analytics logging - non-blocking
             try:
