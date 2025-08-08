@@ -147,6 +147,8 @@ class ONDCSearchView(APIView):
 logger = logging.getLogger(__name__)
 
 
+from django.db import transaction as db_transaction
+
 class OnSearchView(APIView):
     def post(self, request, *args, **kwargs):
         try:
@@ -189,17 +191,9 @@ class OnSearchView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            # try:
-            #     isin = data["message"]["catalog"]["providers"][0]["items"][1]["tags"][
-            #         1
-            #     ]["list"][0]["value"]
-            # except (KeyError, IndexError, TypeError):
-            #     isin = None
-
-            # Save to database
-            with transaction.atomic():
-                # 1. Create ONDCTransaction record
-                txn, created = ONDCTransaction.objects.get_or_create(
+            with db_transaction.atomic():
+                # Create or get ONDCTransaction
+                ondc_txn, created = ONDCTransaction.objects.get_or_create(
                     transaction_id=transaction_id,
                     defaults={
                         "message_id": message_id,
@@ -216,17 +210,12 @@ class OnSearchView(APIView):
                         "ttl": context.get("ttl"),
                     }
                 )
-                
+
                 catalog = data.get("message", {}).get("catalog", {})
                 providers_data = catalog.get("providers", [])
                 categories_data = catalog.get("categories", [])
-                tags_data = catalog.get("tags", [])
 
-                # Optional: Save BPP terms if tags are present (you can expand this)
-                # if tags_data:
-                #    process_bpp_terms(tags_data, txn)
-
-                # 2. Create or update providers and related data
+                # Process providers and categories first
                 for provider_data in providers_data:
                     provider, _ = MutualFundProvider.objects.update_or_create(
                         provider_id=provider_data["id"],
@@ -234,13 +223,15 @@ class OnSearchView(APIView):
                         defaults={"name": provider_data["descriptor"]["name"], "is_active": True},
                     )
 
-                    # 3. Process categories for this provider if present
+                    # Process categories for this provider
                     provider_categories = [c for c in categories_data if c.get("provider_id") == provider_data["id"]]
                     categories_map = {}
                     for cat_data in provider_categories:
                         parent = None
                         if "parent_category_id" in cat_data:
-                            parent = SchemeCategory.objects.filter(category_id=cat_data["parent_category_id"], provider=provider).first()
+                            parent = SchemeCategory.objects.filter(
+                                category_id=cat_data["parent_category_id"], provider=provider
+                            ).first()
                         category, _ = SchemeCategory.objects.update_or_create(
                             category_id=cat_data["id"],
                             provider=provider,
@@ -253,49 +244,84 @@ class OnSearchView(APIView):
                         )
                         categories_map[cat_data["id"]] = category
 
-                    # 4 & 5. Process schemes and plans
                     items = provider_data.get("items", [])
-                    schemes = [i for i in items if i["descriptor"]["code"] == "SCHEME"]
-                    plans = [i for i in items if i["descriptor"]["code"] == "SCHEME_PLAN"]
-                    fulfillments = {f["id"]: f for f in provider_data.get("fulfillments", [])}
+                    schemes_data = [i for i in items if i["descriptor"]["code"] == "SCHEME"]
+                    plans_data = [i for i in items if i["descriptor"]["code"] == "SCHEME_PLAN"]
+                    fulfillments_map = {f["id"]: f for f in provider_data.get("fulfillments", [])}
 
-                    for scheme_data in schemes:
-                        scheme = MutualFundScheme.objects.create(
-                            scheme_id=scheme_data["id"],
-                            provider=provider,
-                            transaction=txn,
-                            name=scheme_data["descriptor"]["name"],
-                            code=scheme_data["descriptor"]["code"],
-                            # add other fields after parsing tags as needed
-                        )
-                        # Add categories to scheme
-                        for cat_id in scheme_data.get("category_ids", []):
-                            if cat_id in categories_map:
-                                scheme.categories.add(categories_map[cat_id])
-
-                        # Create scheme plans linked to this scheme
-                        scheme_plans = [p for p in plans if p.get("parent_item_id") == scheme_data["id"]]
-                        for plan_data in scheme_plans:
-                            plan = SchemePlan.objects.create(
-                                plan_id=plan_data["id"],
-                                scheme=scheme,
-                                name=plan_data["descriptor"]["name"],
-                                code=plan_data["descriptor"]["code"],
-                                # add other plan-specific fields
+                    # Bulk create schemes
+                    scheme_objs = []
+                    for scheme_data in schemes_data:
+                        scheme_objs.append(
+                            MutualFundScheme(
+                                scheme_id=scheme_data["id"],
+                                provider=provider,
+                                transaction=ondc_txn,
+                                name=scheme_data["descriptor"]["name"],
+                                code=scheme_data["descriptor"]["code"],
                             )
+                        )
+                    MutualFundScheme.objects.bulk_create(scheme_objs)
 
-                            # 6. Create fulfillment options linked to plan
-                            for fid in plan_data.get("fulfillment_ids", []):
-                                fulfillment_data = fulfillments.get(fid)
-                                if fulfillment_data:
-                                    FulfillmentOption.objects.create(
+                    # Fetch inserted schemes to link categories and plans
+                    scheme_map = {
+                        s.scheme_id: s
+                        for s in MutualFundScheme.objects.filter(
+                            scheme_id__in=[s.scheme_id for s in scheme_objs]
+                        )
+                    }
+
+                    # Add categories to schemes
+                    for scheme_data in schemes_data:
+                        scheme = scheme_map.get(scheme_data["id"])
+                        if scheme:
+                            for cat_id in scheme_data.get("category_ids", []):
+                                category = categories_map.get(cat_id)
+                                if category:
+                                    scheme.categories.add(category)
+
+                    # Bulk create plans
+                    plan_objs = []
+                    plan_map = {}
+                    for plan_data in plans_data:
+                        scheme_id = plan_data.get("parent_item_id")
+                        scheme = scheme_map.get(scheme_id)
+                        if not scheme:
+                            continue
+                        plan = SchemePlan(
+                            plan_id=plan_data["id"],
+                            scheme=scheme,
+                            name=plan_data["descriptor"]["name"],
+                            code=plan_data["descriptor"]["code"],
+                        )
+                        plan_objs.append(plan)
+
+                    SchemePlan.objects.bulk_create(plan_objs)
+
+                    # Fetch inserted plans for linking fulfillment options
+                    inserted_plans = SchemePlan.objects.filter(plan_id__in=[p.plan_id for p in plan_objs])
+                    plan_map = {p.plan_id: p for p in inserted_plans}
+
+                    # Bulk create fulfillment options
+                    fulfillment_objs = []
+                    for plan_data in plans_data:
+                        plan = plan_map.get(plan_data["id"])
+                        if not plan:
+                            continue
+                        for fid in plan_data.get("fulfillment_ids", []):
+                            fulfillment_data = fulfillments_map.get(fid)
+                            if fulfillment_data:
+                                fulfillment_objs.append(
+                                    FulfillmentOption(
                                         fulfillment_id=fid,
                                         plan=plan,
                                         fulfillment_type=fulfillment_data["type"],
-                                        # add other fulfillment fields (thresholds, etc.) if needed
+                                        # add other fields if needed
                                     )
-                      
+                                )
+                    FulfillmentOption.objects.bulk_create(fulfillment_objs)
 
+            # Analytics logging - non-blocking
             try:
                 send_to_analytics(schema_type="on_search", req_body=data)
             except Exception as e:
@@ -312,11 +338,10 @@ class OnSearchView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # Success response
         return Response(
             {"message": {"ack": {"status": "ACK"}}}, status=status.HTTP_200_OK
         )
-    
+
     @staticmethod
     def extract_isin_from_tags(tags):
         if not tags:
@@ -327,6 +352,7 @@ class OnSearchView(APIView):
                     if item.get("descriptor", {}).get("code") == "ISIN":
                         return item.get("value")
         return None
+
 
 class SchemeByISINView(APIView):
     def get(self, request, *args, **kwargs):
