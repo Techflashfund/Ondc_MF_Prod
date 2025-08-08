@@ -180,7 +180,7 @@ class OnSearchView(APIView):
 
             # Get related transaction
             try:
-                transaction = Transaction.objects.get(transaction_id=transaction_id)
+                txn = Transaction.objects.get(transaction_id=transaction_id)
             except Transaction.DoesNotExist:
                 return Response(
                     {"message": {"ack": {"status": "NACK"}}},
@@ -197,7 +197,7 @@ class OnSearchView(APIView):
             # Save to database
             with transaction.atomic():
                 fos=FullOnSearch.objects.create(
-                    transaction=transaction,
+                    transaction=txn,
                     message_id=message_id,
                     payload=data,
                     timestamp=timestamp,
