@@ -22,7 +22,6 @@ from .models import (FullOnSearch,Scheme, Message, OnCancel, OnConfirm, OnInitSI
                      OnStatus, OnUpdate, PaymentSubmisssion, SelectSIP,
                      SubmissionID, Transaction,ONDCTransaction, MutualFundProvider, MutualFundScheme, 
     SchemePlan, FulfillmentOption, ONDCMutualFundService)
-from .models import *
 from .utils import (build_frequency, get_client_ip, push_observability_logs,
                     send_to_analytics)
 from .serializer import SchemeSerializer
@@ -147,12 +146,12 @@ class ONDCSearchView(APIView):
 logger = logging.getLogger(__name__)
 
 
-from django.db import transaction as db_transaction
-
 class OnSearchView(APIView):
     def post(self, request, *args, **kwargs):
         try:
             data = request.data
+            logger.info("Received on_search callback:\n%s", json.dumps(data, indent=2))
+            print("Received on_search callback:\n", json.dumps(data, indent=2))
 
             context = data.get("context", {})
             message_id = context.get("message_id")
@@ -189,141 +188,53 @@ class OnSearchView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            with db_transaction.atomic():
-                # Create or get ONDCTransaction
-                ondc_txn, created = ONDCTransaction.objects.get_or_create(
-                    transaction_id=transaction_id,
-                    defaults={
-                        "message_id": message_id,
-                        "bap_id": context.get("bap_id"),
-                        "bap_uri": context.get("bap_uri"),
-                        "bpp_id": context.get("bpp_id"),
-                        "bpp_uri": context.get("bpp_uri"),
-                        "domain": context.get("domain"),
-                        "version": context.get("version"),
-                        "action": context.get("action"),
-                        "country_code": context.get("location", {}).get("country", {}).get("code", "IND"),
-                        "city_code": context.get("location", {}).get("city", {}).get("code", "*"),
-                        "timestamp": timestamp,
-                        "ttl": context.get("ttl"),
-                    }
+            # try:
+            #     isin = data["message"]["catalog"]["providers"][0]["items"][1]["tags"][
+            #         1
+            #     ]["list"][0]["value"]
+            # except (KeyError, IndexError, TypeError):
+            #     isin = None
+
+            # Save to database
+            with transaction.atomic():
+                fos=FullOnSearch.objects.create(
+                    transaction=txn,
+                    message_id=message_id,
+                    payload=data,
+                    timestamp=timestamp,
+                    
                 )
 
-                catalog = data.get("message", {}).get("catalog", {})
-                providers_data = catalog.get("providers", [])
-                categories_data = catalog.get("categories", [])
+                providers = data.get("message", {}).get("catalog", {}).get("providers", [])
+                scheme_objects = []
 
-                # Process providers and categories first
-                for provider_data in providers_data:
-                    provider, _ = MutualFundProvider.objects.update_or_create(
-                        provider_id=provider_data["id"],
-                        bpp_id=context.get("bpp_id"),
-                        defaults={"name": provider_data["descriptor"]["name"], "is_active": True},
-                    )
+                for provider in providers:
+                    provider_id = provider.get("id")
+                    fulfillments = provider.get("fulfillments", [])
+                    for item in provider.get("items", []):
+                        # find the matching fulfillment(s) for this item
+                        fulfillment_ids = item.get("fulfillment_ids", [])
+                        matching_fulfillment = None
+                        # pick the first fulfillment object that matches the item's fulfillment_ids
+                        for f in fulfillments:
+                            if f.get("id") in fulfillment_ids:
+                                matching_fulfillment = f
+                                break
 
-                    # Process categories for this provider
-                    provider_categories = [c for c in categories_data if c.get("provider_id") == provider_data["id"]]
-                    categories_map = {}
-                    for cat_data in provider_categories:
-                        parent = None
-                        if "parent_category_id" in cat_data:
-                            parent = SchemeCategory.objects.filter(
-                                category_id=cat_data["parent_category_id"], provider=provider
-                            ).first()
-                        category, _ = SchemeCategory.objects.update_or_create(
-                            category_id=cat_data["id"],
-                            provider=provider,
-                            defaults={
-                                "name": cat_data["descriptor"]["name"],
-                                "code": cat_data["descriptor"]["code"],
-                                "parent_category": parent,
-                                "level": (parent.level + 1) if parent else 0,
-                            },
-                        )
-                        categories_map[cat_data["id"]] = category
+                        scheme_objects.append(
+                            Scheme(
+                                full_on_search=fos,
+                                scheme_id=item.get("id"),
+                                item_id=item.get("id"),              # Save item id
+                                provider_id=provider_id,             # Save provider id
+                                name=item.get("descriptor", {}).get("name"),
+                                category_ids=item.get("category_ids", []),
+                                parent_item_id=item.get("parent_item_id"),
+                                fulfillment_ids=fulfillment_ids,
+                                tags=item.get("tags", []),
+                                isin=self.extract_isin_from_tags(item.get("tags", [])),))
+                      
 
-                    items = provider_data.get("items", [])
-                    schemes_data = [i for i in items if i["descriptor"]["code"] == "SCHEME"]
-                    plans_data = [i for i in items if i["descriptor"]["code"] == "SCHEME_PLAN"]
-                    fulfillments_map = {f["id"]: f for f in provider_data.get("fulfillments", [])}
-
-                    # Bulk create schemes
-                    scheme_objs = []
-                    for scheme_data in schemes_data:
-                        scheme_objs.append(
-                            MutualFundScheme(
-                                scheme_id=scheme_data["id"],
-                                provider=provider,
-                                transaction=ondc_txn,
-                                name=scheme_data["descriptor"]["name"],
-                                code=scheme_data["descriptor"]["code"],
-                            )
-                        )
-                    MutualFundScheme.objects.bulk_create(scheme_objs)
-
-                    # Fetch inserted schemes to link categories and plans
-                    scheme_map = {
-                        s.scheme_id: s
-                        for s in MutualFundScheme.objects.filter(
-                            scheme_id__in=[s.scheme_id for s in scheme_objs]
-                        )
-                    }
-
-                    # Add categories to schemes
-                    for scheme_data in schemes_data:
-                        scheme = scheme_map.get(scheme_data["id"])
-                        if scheme:
-                            for cat_id in scheme_data.get("category_ids", []):
-                                category = categories_map.get(cat_id)
-                                if category:
-                                    scheme.categories.add(category)
-
-                    # Bulk create plans
-                    plan_objs = []
-                    plan_map = {}
-                    for plan_data in plans_data:
-                        scheme_id = plan_data.get("parent_item_id")
-                        scheme = scheme_map.get(scheme_id)
-                        if not scheme:
-                            continue
-                        plan = SchemePlan(
-                            plan_id=plan_data["id"],
-                            scheme=scheme,
-                            name=plan_data["descriptor"]["name"],
-                            code=plan_data["descriptor"]["code"],
-                        )
-                        plan_objs.append(plan)
-
-                    SchemePlan.objects.bulk_create(plan_objs)
-
-                    # Fetch inserted plans for linking fulfillment options
-                    inserted_plans = SchemePlan.objects.filter(plan_id__in=[p.plan_id for p in plan_objs])
-                    plan_map = {p.plan_id: p for p in inserted_plans}
-
-                    # Bulk create fulfillment options
-                    fulfillment_objs = []
-                    for plan_data in plans_data:
-                        plan = plan_map.get(plan_data["id"])
-                        if not plan:
-                            continue
-                        for fid in plan_data.get("fulfillment_ids", []):
-                            fulfillment_data = fulfillments_map.get(fid)
-                            if fulfillment_data:
-                                fulfillment_objs.append(
-                                    FulfillmentOption(
-                                        fulfillment_id=fid,
-                                        plan=plan,
-                                        fulfillment_type=fulfillment_data["type"],
-                                        # add other fields if needed
-                                    )
-                                )
-                    try:
-                        FulfillmentOption.objects.bulk_create(fulfillment_objs)
-                    except Exception as e:
-                        logger.error(f"bulk_create error: {e}, data: {fulfillment_objs}")
-                        raise
-
-            # Analytics logging - non-blocking
             try:
                 send_to_analytics(schema_type="on_search", req_body=data)
             except Exception as e:
@@ -340,10 +251,11 @@ class OnSearchView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+        # Success response
         return Response(
             {"message": {"ack": {"status": "ACK"}}}, status=status.HTTP_200_OK
         )
-
+    
     @staticmethod
     def extract_isin_from_tags(tags):
         if not tags:
@@ -355,7 +267,6 @@ class OnSearchView(APIView):
                         return item.get("value")
         return None
 
-
 class SchemeByISINView(APIView):
     def get(self, request, *args, **kwargs):
         isin = request.query_params.get("isin")
@@ -364,10 +275,15 @@ class SchemeByISINView(APIView):
                 {"error": "Missing required query parameter: isin"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        scheme = get_object_or_404(Scheme, isin=isin)
-        serializer = SchemeSerializer(scheme)
+        schemes = Scheme.objects.filter(isin=isin)
+        if not schemes.exists():
+            return Response(
+                {"error": "No scheme found with this ISIN"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = SchemeSerializer(schemes, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 
@@ -2939,236 +2855,83 @@ class OnCancelView(APIView):
 #             status=status.HTTP_200_OK,
 #         )
 
-
 class Lumpsum(APIView):
-    
+
     def post(self, request, *args, **kwargs):
-        # Extract request data
         transaction_id = request.data.get("transaction_id")
         bpp_id = request.data.get("bpp_id")
         bpp_uri = request.data.get("bpp_uri")
-        isin = request.data.get("isin")
+        isin=request.data.get("isin")
         preferred_type = "LUMPSUM"
         amount = request.data.get("amount", "3000")
         pan = request.data.get("pan", "ABCDE1234F")
         message_id = request.data.get("message_id")
 
-        # Validation
-        if not all([bpp_id, bpp_uri, isin]):
+        if not all([ bpp_id, bpp_uri]):
             return Response(
-                {"error": "Required fields: bpp_id, bpp_uri, isin"}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Required all Fields"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            # Method 1: Use the new ONDC models (Recommended)
-            scheme_plan = self.get_scheme_plan_from_ondc_models(isin, bpp_id, preferred_type, amount)
-            
-            if not scheme_plan:
-                # Method 2: Fallback to existing Scheme model
-                scheme_plan = self.get_scheme_plan_from_existing_model(isin, preferred_type)
-            
-            if not scheme_plan:
-                return Response(
-                    {"error": "Scheme not found or no matching fulfillment options"}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
+        # obj = get_object_or_404(
+        #     FullOnSearch,
+        #     payload__context__bpp_id=bpp_id,
+        #     payload__context__bpp_uri=bpp_uri,
+        #     isin=isin
+        #     # transaction__transaction_id=transaction_id,
+        # )
 
-        except Exception as e:
-            logger.error(f"Error fetching scheme: {str(e)}", exc_info=True)
-            return Response(
-                {"error": "Internal server error"}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-        # Generate IDs if not provided
+        obj= Scheme.objects.filter(isin=isin).first()
         if not transaction_id:
-            transaction_id = str(uuid.uuid4())
+            transaction_id=str(uuid.uuid4())
+
         if not message_id:
             message_id = str(uuid.uuid4())
-            
         timestamp = datetime.utcnow().isoformat(sep="T", timespec="milliseconds") + "Z"
-
-        # Create or get ONDC transaction
-        ondc_transaction = self.create_or_get_ondc_transaction(
-            transaction_id, message_id, bpp_id, bpp_uri, timestamp
-        )
-
-        # Build payload using scheme data
-        payload = self.build_select_payload(
-            scheme_plan, transaction_id, message_id, timestamp, 
-            bpp_id, bpp_uri, amount, pan, preferred_type
-        )
-
-        # Create/Update your existing transaction and message records
-        self.create_transaction_records(transaction_id, message_id, timestamp, payload)
-
-        # Send to gateway
-        response = self.send_to_gateway(bpp_uri, payload)
         
-        # Analytics logging
-        try:
-            send_to_analytics(schema_type="select", req_body=payload)
-        except Exception as e:
-            logger.error(f"Observability logging failed: {str(e)}", exc_info=True)
 
-        return Response(
-            {
-                "status_code": response.status_code,
-                "response": response.json() if response.content else {},
-                "ondc_transaction_id": ondc_transaction.id if ondc_transaction else None,
-            },
-            status=status.HTTP_200_OK,
+        # Get the provider and fulfillment data from the FullOnSearch payload
+        full_on_search_payload = obj.full_on_search.payload
+        
+        # Find the provider that contains the item with matching ISIN
+        provider = None
+        matching_item = None
+        
+        for prov in full_on_search_payload["message"]["catalog"]["providers"]:
+            for item in prov.get("items", []):
+                # Check if this item has the matching ISIN in its tags
+                for tag in item.get("tags", []):
+                    if tag.get("descriptor", {}).get("code") == "PLAN_IDENTIFIERS":
+                        for tag_item in tag.get("list", []):
+                            if (tag_item.get("descriptor", {}).get("code") == "ISIN" and 
+                                tag_item.get("value") == isin):
+                                provider = prov
+                                matching_item = item
+                                break
+                    if provider:
+                        break
+                if provider:
+                    break
+            if provider:
+                break
+        
+        # Find matching fulfillment from the provider's fulfillments
+        matching_fulfillment = next(
+            (f for f in provider["fulfillments"] if f.get("type") == preferred_type),
+            None,
         )
-
-    def get_scheme_plan_from_ondc_models(self, isin, bpp_id, preferred_type, amount):
-        """
-        Get scheme plan using the new ONDC models (Recommended approach)
-        """
-        try:
-            # Find the scheme plan by ISIN and provider
-            scheme_plan = SchemePlan.objects.select_related(
-                'scheme__provider'
-            ).prefetch_related(
-                'fulfillment_options',
-                'scheme__categories'
-            ).get(
-                isin=isin,
-                scheme__provider__bpp_id=bpp_id,
-                scheme__status='active'
+        
+        if not matching_fulfillment:
+            return Response(
+                {"error": f"No {preferred_type} fulfillment found"}, status=status.HTTP_400_BAD_REQUEST
             )
-            
-            # Check if there's a matching fulfillment option
-            fulfillment_option = scheme_plan.fulfillment_options.filter(
-                fulfillment_type=preferred_type
-            ).first()
-            
-            if not fulfillment_option:
-                logger.warning(f"No {preferred_type} fulfillment option found for ISIN: {isin}")
-                return None
-            
-            # Validate amount against thresholds
-            amount_float = float(amount)
-            if (fulfillment_option.amount_min and amount_float < fulfillment_option.amount_min) or \
-               (fulfillment_option.amount_max and amount_float > fulfillment_option.amount_max):
-                logger.warning(f"Amount {amount} is outside allowed range for ISIN: {isin}")
-                return None
-            
-            return {
-                'type': 'ondc_model',
-                'scheme_plan': scheme_plan,
-                'fulfillment_option': fulfillment_option,
-                'provider_data': {
-                    'id': scheme_plan.scheme.provider.provider_id,
-                    'name': scheme_plan.scheme.provider.name
-                },
-                'scheme_data': {
-                    'id': scheme_plan.scheme.scheme_id,
-                    'name': scheme_plan.scheme.name
-                },
-                'plan_data': {
-                    'id': scheme_plan.plan_id,
-                    'name': scheme_plan.name
-                }
-            }
-            
-        except SchemePlan.DoesNotExist:
-            logger.info(f"Scheme plan not found in ONDC models for ISIN: {isin}")
-            return None
-        except Exception as e:
-            logger.error(f"Error in get_scheme_plan_from_ondc_models: {str(e)}")
-            return None
 
-    def get_scheme_plan_from_existing_model(self, isin, preferred_type):
-        """
-        Fallback method using existing Scheme model
-        """
-        try:
-            obj = get_object_or_404(Scheme, isin=isin)
-            
-            # Extract provider and fulfillment data from payload
-            provider = obj.payload["message"]["catalog"]["providers"][0]
-            
-            matching_fulfillment = next(
-                (f for f in provider["fulfillments"] if f.get("type") == preferred_type),
-                None,
-            )
-            
-            if not matching_fulfillment:
-                return None
-            
-            return {
-                'type': 'existing_model',
-                'scheme_obj': obj,
-                'provider_data': provider,
-                'fulfillment_data': matching_fulfillment
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in get_scheme_plan_from_existing_model: {str(e)}")
-            return None
-
-    def create_or_get_ondc_transaction(self, transaction_id, message_id, bpp_id, bpp_uri, timestamp):
-        """
-        Create or get ONDC transaction record
-        """
-        try:
-            ondc_transaction, created = ONDCTransaction.objects.get_or_create(
-                transaction_id=transaction_id,
-                defaults={
-                    'message_id': message_id,
-                    'bap_id': os.getenv('BAP_ID', 'api.buyerapp.com'),
-                    'bap_uri': os.getenv('BAP_URI', 'https://api.buyerapp.com/ondc'),
-                    'bpp_id': bpp_id,
-                    'bpp_uri': bpp_uri,
-                    'domain': 'ONDC:FIS14',
-                    'version': '2.0.0',
-                    'action': 'select',
-                    'country_code': 'IND',
-                    'city_code': '*',
-                    'timestamp': parse_datetime(timestamp),
-                    'ttl': 'PT10M'
-                }
-            )
-            
-            if created:
-                logger.info(f"Created new ONDC transaction: {transaction_id}")
-            else:
-                logger.info(f"Using existing ONDC transaction: {transaction_id}")
-            
-            return ondc_transaction
-            
-        except Exception as e:
-            logger.error(f"Error creating ONDC transaction: {str(e)}")
-            return None
-
-    def build_select_payload(self, scheme_plan, transaction_id, message_id, timestamp, 
-                           bpp_id, bpp_uri, amount, pan, preferred_type):
-        """
-        Build the select payload based on scheme plan data
-        """
-        if scheme_plan['type'] == 'ondc_model':
-            # Use ONDC model data
-            provider_id = scheme_plan['provider_data']['id']
-            scheme_id = scheme_plan['scheme_data']['id']
-            plan_id = scheme_plan['plan_data']['id']
-            fulfillment_id = scheme_plan['fulfillment_option'].fulfillment_id
-            
-        else:
-            # Use existing model data
-            provider_data = scheme_plan['provider_data']
-            provider_id = provider_data['id']
-            scheme_id = provider_data['items'][0]['id']  # Assuming first item is scheme
-            plan_id = provider_data['items'][1]['id'] if len(provider_data['items']) > 1 else scheme_id
-            fulfillment_id = scheme_plan['fulfillment_data']['id']
-
-        payload = {
+        payload1 = {
             "context": {
                 "location": {"country": {"code": "IND"}, "city": {"code": "*"}},
                 "domain": "ONDC:FIS14",
                 "timestamp": timestamp,
-                "bap_id": os.getenv('BAP_ID', 'api.buyerapp.com'),
-                "bap_uri": os.getenv('BAP_URI', 'https://api.buyerapp.com/ondc'),
+                "bap_id": BAP_ID,
+                "bap_uri": BAP_URI,
                 "transaction_id": transaction_id,
                 "message_id": message_id,
                 "version": "2.0.0",
@@ -3179,22 +2942,22 @@ class Lumpsum(APIView):
             },
             "message": {
                 "order": {
-                    "provider": {"id": provider_id},
+                    "provider": {"id": provider["id"]},
                     "items": [
                         {
-                            "id": plan_id,  # Use plan ID instead of scheme ID
+                            "id": matching_item["id"],
                             "quantity": {
                                 "selected": {
                                     "measure": {"value": amount, "unit": "INR"}
                                 }
                             },
-                            "fulfillment_ids": [fulfillment_id],
+                            "fulfillment_ids": [matching_fulfillment["id"]],
                         }
                     ],
                     "fulfillments": [
                         {
-                            "id": fulfillment_id,
-                            "type": preferred_type,
+                            "id": matching_fulfillment["id"],
+                            "type": matching_fulfillment["type"],
                             "customer": {
                                 "person": {
                                     "id": "pan:" + pan,
@@ -3238,42 +3001,18 @@ class Lumpsum(APIView):
                 }
             },
         }
-        
-        return payload
+        transaction = Transaction.objects.create(transaction_id=transaction_id)
+        Message.objects.create(
+            transaction=transaction,
+            message_id=message_id,
+            action="select",
+            timestamp=parse_datetime(timestamp),
+            payload=payload1,
+        )
 
-    def create_transaction_records(self, transaction_id, message_id, timestamp, payload):
-        """
-        Create or update your existing Transaction and Message records
-        """
-        try:
-            # Create or get existing transaction
-            transaction, created = Transaction.objects.get_or_create(
-                transaction_id=transaction_id,
-                defaults={
-                    'created_at': parse_datetime(timestamp),
-                    # Add other fields as needed
-                }
-            )
-            
-            # Create message record
-            Message.objects.create(
-                transaction=transaction,
-                message_id=message_id,
-                action="select",
-                timestamp=parse_datetime(timestamp),
-                payload=payload,
-            )
-            
-            logger.info(f"Created transaction records for: {transaction_id}")
-            
-        except Exception as e:
-            logger.error(f"Error creating transaction records: {str(e)}")
-
-    def send_to_gateway(self, bpp_uri, payload):
-        """
-        Send request to gateway
-        """
-        request_body_str = json.dumps(payload, separators=(",", ":"))
+        print(payload1)
+        # Send to gateway
+        request_body_str = json.dumps(payload1, separators=(",", ":"))
         auth_header = create_authorisation_header(request_body=request_body_str)
 
         headers = {
@@ -3282,102 +3021,24 @@ class Lumpsum(APIView):
             "X-Gateway-Authorization": os.getenv("SIGNED_UNIQUE_REQ_ID", ""),
             "X-Gateway-Subscriber-Id": os.getenv("SUBSCRIBER_ID"),
         }
-
+        print('header :',headers)
+        print('auth_header:',auth_header)
         response = requests.post(
-            f"{bpp_uri}/select", data=request_body_str, headers=headers
+            f"{bpp_uri}/select", json=request_body_str, headers=headers
         )
-        
-        return response
-
-
-# Additional utility class for bulk operations
-class ONDCTransactionManager:
-    """
-    Utility class for managing ONDC transactions and integrating with existing models
-    """
-    
-    @classmethod
-    def sync_existing_schemes_to_ondc(cls):
-        """
-        One-time migration script to sync existing Scheme data to ONDC models
-        """
-        existing_schemes = Scheme.objects.all()
-        
-        for scheme in existing_schemes:
-            try:
-                # Process the scheme payload and create ONDC models
-                ONDCMutualFundService.process_ondc_response(scheme.payload)
-                logger.info(f"Synced scheme: {scheme.isin}")
-                
-            except Exception as e:
-                logger.error(f"Error syncing scheme {scheme.isin}: {str(e)}")
-    
-    @classmethod
-    def get_scheme_by_isin(cls, isin, bpp_id=None):
-        """
-        Unified method to get scheme data from either ONDC models or existing models
-        """
-        # Try ONDC models first
         try:
-            query = SchemePlan.objects.select_related('scheme__provider')
-            if bpp_id:
-                query = query.filter(scheme__provider__bpp_id=bpp_id)
-            
-            scheme_plan = query.get(isin=isin)
-            return {
-                'source': 'ondc',
-                'scheme_plan': scheme_plan,
-                'provider': scheme_plan.scheme.provider,
-                'scheme': scheme_plan.scheme
-            }
-            
-        except SchemePlan.DoesNotExist:
-            pass
-        
-        # Fallback to existing models
-        try:
-            scheme = Scheme.objects.get(isin=isin)
-            return {
-                'source': 'existing',
-                'scheme_obj': scheme
-            }
-            
-        except Scheme.DoesNotExist:
-            return None
+            send_to_analytics(schema_type="select", req_body=payload1)
+        except Exception as e:
+            logger.error(f"Observability logging failed: {str(e)}", exc_info=True)
 
-    @classmethod
-    def validate_investment_amount(cls, isin, amount, fulfillment_type, bpp_id=None):
-        """
-        Validate investment amount against scheme thresholds
-        """
-        scheme_data = cls.get_scheme_by_isin(isin, bpp_id)
-        
-        if not scheme_data:
-            return False, "Scheme not found"
-        
-        amount_float = float(amount)
-        
-        if scheme_data['source'] == 'ondc':
-            # Use ONDC model validation
-            fulfillment = scheme_data['scheme_plan'].fulfillment_options.filter(
-                fulfillment_type=fulfillment_type
-            ).first()
-            
-            if not fulfillment:
-                return False, f"No {fulfillment_type} option available"
-            
-            if fulfillment.amount_min and amount_float < fulfillment.amount_min:
-                return False, f"Minimum amount is {fulfillment.amount_min}"
-            
-            if fulfillment.amount_max and amount_float > fulfillment.amount_max:
-                return False, f"Maximum amount is {fulfillment.amount_max}"
-            
-            return True, "Valid"
-        
-        else:
-            # Use existing model validation (extract from payload)
-            # Implementation depends on your existing payload structure
-            return True, "Valid"
+        return Response(
+            {
+                "status_code": response.status_code,
+                "response": response.json() if response.content else {},
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class LumpFormSub(APIView):
 

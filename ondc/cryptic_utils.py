@@ -98,7 +98,7 @@ def create_authorisation_header(request_body=None, created=None, expires=None):
     unique_key_id = os.getenv("UNIQUE_KEY_ID", "207")
     header = (
         f'Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",'
-        f'algorithm="ed25519",created="{created}",expires="{expires}",'
+        f'algorithm="ed25519",created={created},expires={expires},'
         f'headers="(created) (expires) digest",signature="{signature}"'
     )
     return header
