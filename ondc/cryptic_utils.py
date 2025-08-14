@@ -66,17 +66,31 @@ def get_filter_dictionary_or_operation(filter_string):
     return {kv.split('=')[0].strip(): kv.split('=')[1].strip().replace("\"", "") for kv in filter_string_list}
 
 
-def create_authorisation_header(request_body, created=None, expires=None):
-    created = int(datetime.datetime.now().timestamp()) if created is None else created
-    expires = int((datetime.datetime.now() + datetime.timedelta(hours=1)).timestamp()) if expires is None else expires
-    signing_key = create_signing_string(hash_message(request_body),
-                                        created=created, expires=expires)
+def create_authorisation_header(request_body=None, created=None, expires=None):
+    request_body = request_body 
+    if request_body is None:
+        raise ValueError("Request body not found or invalid.")
+    
+    if created is None:
+        created = int(datetime.datetime.now().timestamp()) - 1000
+
+    if expires is None:
+        expires = int((datetime.datetime.now() + datetime.timedelta(minutes=10)).timestamp())
+
+    
+    
+
+    signing_key = create_signing_string(hash_message(request_body), created, expires)
+    print("Signing Key:", signing_key)  # For debugging
     signature = sign_response(signing_key, private_key=os.getenv("Signing_private_key"))
 
     subscriber_id = os.getenv("SUBSCRIBER_ID", "buyer-app.ondc.org")
     unique_key_id = os.getenv("UNIQUE_KEY_ID", "207")
-    header = f'"Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",algorithm="ed25519",created=' \
-             f'"{created}",expires="{expires}",headers="(created) (expires) digest",signature="{signature}""'
+    header = (
+        f'Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",'
+        f'algorithm="ed25519",created="{created}",expires="{expires}",'
+        f'headers="(created) (expires) digest",signature="{signature}"'
+    )
     return header
 
 
