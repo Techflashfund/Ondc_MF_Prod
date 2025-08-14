@@ -25,6 +25,7 @@ from .models import (FullOnSearch,Scheme, Message, OnCancel, OnConfirm, OnInitSI
 from .utils import (build_frequency, get_client_ip, push_observability_logs,
                     send_to_analytics)
 from .serializer import SchemeSerializer
+from .services import sign_request_id
 
 BAP_ID = "investment.flashfund.in"
 BAP_URI = "https://investment.flashfund.in/ondc"
@@ -3001,16 +3002,15 @@ class Lumpsum(APIView):
                 }
             },
         }
-        transaction = Transaction.objects.create(transaction_id=transaction_id)
-        Message.objects.create(
-            transaction=transaction,
-            message_id=message_id,
-            action="select",
-            timestamp=parse_datetime(timestamp),
-            payload=payload1,
-        )
+        # transaction = Transaction.objects.create(transaction_id=transaction_id)
+        # Message.objects.create(
+        #     transaction=transaction,
+        #     message_id=message_id,
+        #     action="select",
+        #     timestamp=parse_datetime(timestamp),
+        #     payload=payload1,
+        # )
 
-        print(payload1)
         # Send to gateway
         request_body_str = json.dumps(payload1, separators=(",", ":"))
         auth_header = create_authorisation_header(request_body=request_body_str)
@@ -3018,7 +3018,7 @@ class Lumpsum(APIView):
         headers = {
             "Content-Type": "application/json",
             "Authorization": auth_header,
-            "X-Gateway-Authorization": os.getenv("SIGNED_UNIQUE_REQ_ID", ""),
+            "X-Gateway-Authorization": sign_request_id(transaction_id),
             "X-Gateway-Subscriber-Id": os.getenv("SUBSCRIBER_ID"),
         }
         print('header :',headers)
