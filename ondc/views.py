@@ -3021,8 +3021,8 @@ class Lumpsum(APIView):
             "X-Gateway-Authorization": sign_request_id(transaction_id),
             "X-Gateway-Subscriber-Id": os.getenv("SUBSCRIBER_ID"),
         }
-        print('header :',headers)
-        print('auth_header:',auth_header)
+        logger.info(f"Sending to {bpp_uri}/select with headers: {headers}")
+        logger.info(f"Authorization header: {auth_header}")
         response = requests.post(
             f"{bpp_uri}/select", json=request_body_str, headers=headers
         )
